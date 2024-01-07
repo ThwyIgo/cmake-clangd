@@ -9,7 +9,7 @@
 ;; Keywords: tools
 ;; URL: https://example.com
 
-;; Package-Requires: (eglot)
+;; Package-Requires: (eglot json)
 
 ;; This file is not part of GNU Emacs.
 
@@ -47,20 +47,44 @@ This is the directory used with \"-B\" cmake flag when configuring the project."
                                  eglot-project-root
                                (unless (null buffer-file-name)
                                  (cmake-clangd-find-file-up-dir "CMakeLists.txt" (file-name-parent-directory buffer-file-name))))))
-
-    (if (null cmake-project-root)
-        (error "CMakeLists.txt not found")
-      (cmake-clangd-log "Found an initial CMakeLists.txt in " cmake-project-root))
     (cmake-clangd-log "Eglot project: " eglot-project-root)
+    (unless (null cmake-project-root)
+      (cmake-clangd-log "Found an initial CMakeLists.txt in " cmake-project-root))
 
-    ;; Find top-level CMakeLists.txt with CMake file API
-    (unless (file-exists-p (concat cmake-project-root "CMakePresets.json"))
-      (let ((inhibit-read-only t))
-        (call-process "cmake" nil cmake-clangd-output-buffer nil
-                      "-S" cmake-project-root
-                      "-B" (concat eglot-project-root cmake-clangd-build-dir)
-                      "-DCMAKE_BUILD_TYPE=Debug"))
-      )
+    (when (interactive-p)
+      (setq cmake-project-root
+            (expand-file-name (file-name-parent-directory
+                               (read-file-name "Top-level CMakeLists.txt: " cmake-project-root "CMakeLists.txt" t "CMakeLists.txt"
+                                               (lambda (file) (and
+                                                               (file-exists-p file)
+                                                               (string-match-p "CMakeLists\\.txt" file)))))))
+      (cmake-clangd-log "User chose project root as: " cmake-project-root))
+
+    (when (null cmake-project-root)
+      (error "CMakeLists.txt not found"))
+
+    ;; Search for presets
+    (let ((presets-file (concat cmake-project-root "CMakePresets.json")))
+      (when (file-exists-p presets-file)
+        (cmake-clangd-log "Presets found!")
+        ;; Parse json
+        ))
+
+    ;; Find executable targets with CMake file API
+    ;; (let ((inhibit-read-only t)
+    ;;       (cmake-api-dir (concat eglot-project-root cmake-clangd-build-dir
+    ;;                              ".cmake/api/v1/"))
+    ;;       (cmake-api-index nil))
+    ;;   (make-empty-file (concat cmake-api-dir "query/codemodel-v2") t)
+    ;;   (call-process "cmake" nil cmake-clangd-output-buffer nil
+    ;;                 "-S" cmake-project-root
+    ;;                 "-B" (concat eglot-project-root cmake-clangd-build-dir)
+    ;;                 "-DCMAKE_BUILD_TYPE=Debug")
+    ;;   (setq cmake-api-index
+    ;;         (car-safe (directory-files (concat cmake-api-dir "reply/") t
+    ;;                                    "index-.*\\.json")))
+    ;;   (cmake-clangd-log "API index: " cmake-api-index)
+    ;;   )
     )
   )
 
@@ -69,7 +93,6 @@ This is the directory used with \"-B\" cmake flag when configuring the project."
 up 1 level in the directory hierarchy and repeat.
 Returns the directory where `filename' is located, or nil if it is not found."
   (let ((cmake-project-root directory))
-    ;; Go up 1 directory until a CMakeLists.txt is found.
     (while (and (not (null cmake-project-root))
                 (not (file-readable-p (concat cmake-project-root filename))))
       (setq cmake-project-root (file-name-parent-directory cmake-project-root)))
