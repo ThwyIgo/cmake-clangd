@@ -87,7 +87,6 @@ This is the directory used with \"-B\" cmake flag when configuring the project."
   (let ((presets-file (concat cmake-project-root "CMakePresets.json")))
     (when (file-exists-p presets-file)
       (cmake-clangd-log "Presets found!")
-      ;; Parse json (follow preset hierarchy)
       (let* ((presets-json (json-read-file "CMakePresets.json"))
              (configure-presets (alist-get 'configurePresets presets-json))
              (configure-presets-names
@@ -95,8 +94,36 @@ This is the directory used with \"-B\" cmake flag when configuring the project."
                                     (unless (alist-get 'hidden preset)
                                       (alist-get 'name preset)))
                                   configure-presets)))
-             (chosen-preset (completing-read "Configure preset: " configure-presets-names nil t)))
-        (cmake-clangd-log "Chosen preset: " chosen-preset)
+             (chosen-preset-name (completing-read "Configure preset: " configure-presets-names nil t)))
+        (cmake-clangd-log "Chosen preset: " chosen-preset-name)
+
+        ;; Follow preset hierarchy until binaryDir is found. If it's not found, use `cmake-clangd-build-dir'
+        (let* ((chosen-preset (seq-find (lambda (i)
+                                          (string-equal chosen-preset-name (alist-get 'name i)))
+                                        configure-presets))
+               (inherited-preset chosen-preset)
+              (binary-dir nil))
+
+          (while (null binary-dir)
+            (setq binary-dir (alist-get 'binaryDir inherited-preset))
+            (when (null binary-dir)
+              (setq inherited-preset
+                    (seq-find (lambda (i)
+                                (string-equal (alist-get 'inherits inherited-preset) (alist-get 'name i)))
+                              configure-presets))
+              (when (null inherited-preset)
+                (setq binary-dir cmake-clangd-build-dir))))
+
+          (setq binary-dir (string-replace "${sourceDir}" "." binary-dir)
+                binary-dir (string-replace "${presetName}" chosen-preset-name binary-dir))
+          (cmake-clangd-log "Binary dir: " binary-dir)
+
+          ;; Set directory variable (not working)
+          (dir-locals-set-class-variables 'cmake-clangd
+                                          '((nil . ((cmake-clangd-binary-dir . binary-dir)))))
+          (dir-locals-set-directory-class cmake-project-root 'cmake-clangd)
+          (message cmake-clangd-binary-dir)
+          )
         )
       ))
   )
