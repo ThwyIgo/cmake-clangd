@@ -63,12 +63,7 @@ This is the directory used with \"-B\" cmake flag when configuring the project."
     (when (null cmake-project-root)
       (error "CMakeLists.txt not found"))
 
-    ;; Search for presets
-    (let ((presets-file (concat cmake-project-root "CMakePresets.json")))
-      (when (file-exists-p presets-file)
-        (cmake-clangd-log "Presets found!")
-        ;; Parse json
-        ))
+    (cmake-clangd-configure cmake-project-root)
 
     ;; Find executable targets with CMake file API
     ;; (let ((inhibit-read-only t)
@@ -86,6 +81,24 @@ This is the directory used with \"-B\" cmake flag when configuring the project."
     ;;   (cmake-clangd-log "API index: " cmake-api-index)
     ;;   )
     )
+  )
+
+(defun cmake-clangd-configure (cmake-project-root)
+  (let ((presets-file (concat cmake-project-root "CMakePresets.json")))
+    (when (file-exists-p presets-file)
+      (cmake-clangd-log "Presets found!")
+      ;; Parse json (follow preset hierarchy)
+      (let* ((presets-json (json-read-file "CMakePresets.json"))
+             (configure-presets (alist-get 'configurePresets presets-json))
+             (configure-presets-names
+              (remove nil (mapcar (lambda (preset)
+                                    (unless (alist-get 'hidden preset)
+                                      (alist-get 'name preset)))
+                                  configure-presets)))
+             (chosen-preset (completing-read "Configure preset: " configure-presets-names nil t)))
+        (cmake-clangd-log "Chosen preset: " chosen-preset)
+        )
+      ))
   )
 
 (defun cmake-clangd-find-file-up-dir (filename directory)
