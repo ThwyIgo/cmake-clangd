@@ -27,15 +27,23 @@
   :prefix "cmake-clangd-"
   :group 'applications)
 
-(defconst cmake-clangd-output-buffer "*cmake-clangd-output*"
-  "The name of the buffer where output will be outputted.
-It should be a read-only buffer.")
-
 (defcustom cmake-clangd-build-dir "out/"
   "Directory where build files will be.
 This is the directory used with \"-B\" cmake flag when configuring the project."
   :type 'directory
   :group 'cmake-clangd)
+
+(defconst cmake-clangd-output-buffer "*cmake-clangd-output*"
+  "The name of the buffer where output will be outputted.
+It is a read-only buffer.")
+
+(defvar cmake-clangd-last-flags nil
+  "Last flags used with CMake. They will be suggested to the user when
+configuring the project. It should be a list of strings.")
+
+(defvar cmake-clangd-last-binary-dir nil
+  "Last binary dir built or cofigured with CMakek. It will be suggested to the
+user when building the project. It should be a directory.")
 
 ;;;;###autoload
 (defun cmake-clangd-setup ()
@@ -63,7 +71,13 @@ This is the directory used with \"-B\" cmake flag when configuring the project."
     (when (null cmake-project-root)
       (error "CMakeLists.txt not found"))
 
-    (cmake-clangd-configure cmake-project-root)
+    ;; Call CMake to configure the project
+    (let ((inhibit-read-only t)
+          (cmake-flags (cmake-clangd-configure cmake-project-root)))
+      (cmake-clangd-log "CMake configure flags: " (format "%s" cmake-flags))
+      (apply #'call-process "cmake" nil cmake-clangd-output-buffer nil
+             cmake-flags)
+      )
 
     ;; Find executable targets with CMake file API
     ;; (let ((inhibit-read-only t)
@@ -84,6 +98,8 @@ This is the directory used with \"-B\" cmake flag when configuring the project."
   )
 
 (defun cmake-clangd-configure (cmake-project-root)
+  "Returns CMake configure flags and updates `cmake-clangd-last-flags' and
+`cmake-clangd-last-binary-dir'."
   (let ((presets-file (concat cmake-project-root "CMakePresets.json")))
     (when (file-exists-p presets-file)
       (cmake-clangd-log "Presets found!")
@@ -114,15 +130,19 @@ This is the directory used with \"-B\" cmake flag when configuring the project."
               (when (null inherited-preset)
                 (setq binary-dir cmake-clangd-build-dir))))
 
-          (setq binary-dir (string-replace "${sourceDir}" "." binary-dir)
-                binary-dir (string-replace "${presetName}" chosen-preset-name binary-dir))
+          (setq binary-dir (string-replace "${sourceDir}" (directory-file-name cmake-project-root) binary-dir)
+                binary-dir (string-replace "${presetName}" chosen-preset-name binary-dir)
+                binary-dir (file-name-as-directory binary-dir))
           (cmake-clangd-log "Binary dir: " binary-dir)
 
-          ;; Set directory variable (not working)
-          (dir-locals-set-class-variables 'cmake-clangd
-                                          '((nil . ((cmake-clangd-binary-dir . binary-dir)))))
-          (dir-locals-set-directory-class cmake-project-root 'cmake-clangd)
-          (message cmake-clangd-binary-dir)
+          (setq cmake-clangd-last-flags (split-string (read-string "Additional CMake flags: " cmake-clangd-last-flags))
+                cmake-clangd-last-binary-dir binary-dir)
+
+          ;; Return CMake flags
+          (append `("-S" ,cmake-project-root
+                    "-B" ,cmake-clangd-last-binary-dir
+                    "-DCMAKE_BUILD_TYPE=Debug")
+                  cmake-clangd-last-flags)
           )
         )
       ))
@@ -147,7 +167,7 @@ Returns the directory where `filename' is located, or nil if it is not found."
     (read-only-mode t)
     (end-of-buffer)
     (let ((inhibit-read-only t))
-      (apply 'insert strings)
+      (apply #'insert strings)
       (insert "\n"))
     )
   )
