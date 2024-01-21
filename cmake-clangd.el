@@ -78,9 +78,7 @@ configuring the project. It should be a list of strings.")
       (apply #'call-process "cmake" nil cmake-clangd-output-buffer nil
              cmake-flags)
 
-      (with-temp-file (concat cmake-project-root ".clangd")
-        (insert (concat "CompileFlags:
-    CompilationDatabase: " binary-dir)))
+      (cmake-clangd-set-compilationdatabase (concat cmake-project-root ".clangd") binary-dir)
 
       (message "cmake-clangd: finished setup!")
       (eglot-reconnect (eglot-current-server)) ;; Make clangd find .clangd
@@ -101,6 +99,18 @@ configuring the project. It should be a list of strings.")
     ;;                                    "index-.*\\.json")))
     ;;   (cmake-clangd-log "API index: " cmake-api-index)
     ;;   )
+    )
+  )
+
+;;;###autoload
+(defun cmake-clangd-build ()
+  "Build a CMake project located in a directory.
+Uses .clangd file the find the build directory."
+  (interactive)
+  (let ((dotclangd (concat (cmake-clangd-find-file-up-dir ".clangd" (file-name-parent-directory buffer-file-name))
+                           ".clangd")))
+    (cmake-clangd-log ".clangd dir: " dotclangd)
+    (cmake-clangd-log "CompilationDatabase: " (cmake-clangd-get-compilationdatabase dotclangd))
     )
   )
 
@@ -156,13 +166,43 @@ configuring the project. It should be a list of strings.")
       ))
   )
 
-;;;###autoload
-(defun cmake-clangd-build ()
-  "Build a CMake project located in a directory."
-  (interactive)
-  (let ((dotclangd (cmake-clangd-find-file-up-dir ".clangd" (file-name-parent-directory buffer-file-name))))
-    (cmake-clangd-log ".clangd: " dotclangd)
+(defun cmake-clangd-set-compilationdatabase (dotclangd value)
+  "Use regex to find where CompilationDatabase option is in `dotclangd' and replace
+it with `value'. KISS.
+If `dotclangd' doesn't exist, create it."
+  (with-temp-buffer
+    (if (file-exists-p dotclangd)
+      (progn
+        (insert-file-contents dotclangd)
+        (if (re-search-forward "CompilationDatabase:" nil t)
+            (kill-line)
+          ;; else
+          (if (re-search-forward "CompileFlags:" nil t)
+              (insert "
+    CompilationDatabase: ")
+            ;; else
+            (insert "CompileFlags:
+    CompilationDatabase: "))))
+
+      ;; if `dotclangd' file doesn't exist
+      (insert "CompileFlags:
+    CompilationDatabase: ")
+      )
+    (insert value)
+    (write-file dotclangd)
     )
+  )
+
+(defun cmake-clangd-get-compilationdatabase (dotclangd)
+  "Get CompileFlags:CompilationDatabase from a .clangd file using regex."
+  (with-temp-buffer
+    (insert-file-contents dotclangd)
+    (when (re-search-forward "CompilationDatabase:" nil t)
+      (forward-whitespace 1)
+      (let ((initial-point (point)))
+        (end-of-line)
+        (buffer-substring initial-point (point))
+        )))
   )
 
 (defun cmake-clangd-find-file-up-dir (filename directory)
